@@ -1,0 +1,16 @@
+*.o
+*.cmake
+*.make
+Makefile
+CXX.includecache
+dlib_build/*
+results/*
+chin_types_base/*
+chin_types_base_small/*
+dlib_res/*
+CMakeFiles/*
+*.cbp
+CMakeCache.txt
+*.txt.user
+dlib_res/*
+CMakeLists.txt.*
