@@ -2,14 +2,20 @@
 #define FACE_RECOG_
 
 #include <opencv2/core/core.hpp>
-#include <opencv2/>
+#include <opencv2/contrib/contrib.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <boost/format.hpp>
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <cstdio>
+#include <string>
+#include "TestBase.h"
 
 static cv::Mat norm_0_255(cv::InputArray _src) {
     cv::Mat src = _src.getMat();
+
+
     // Create and return normalized image:
     cv::Mat dst;
     switch(src.channels()) {
@@ -26,89 +32,113 @@ static cv::Mat norm_0_255(cv::InputArray _src) {
     return dst;
 }
 
-static void read_csv(const std::string& filename, std::vector<Mat>& images, std::vector<int>& labels, char separator = ';') {
-    std::ifstream file(filename.c_str(), ifstream::in);
-    if (!file) {
-        std::string error_message = "No valid input file was given, please check the given filename.";
-        CV_Error(CV_StsBadArg, error_message);
-    }
+cv::String FaceCascadeName = "./cascades/haarcascade_frontalface_alt.xml";
 
-    std::string line, path, classlabel;
-    while (getline(file, line)) {
-        std::stringstream liness(line);
-        std::getline(liness, path, separator);
-        std::getline(liness, classlabel);
-        if(!path.empty() && !classlabel.empty()) {
-            images.push_back(imread(path, 0));
-            labels.push_back(atoi(classlabel.c_str()));
-        }
+cv::CascadeClassifier faceCascade;
+
+void CascadeInit() {
+    if (!faceCascade.load(FaceCascadeName)) {
+        std::cout << "--(!)Error loading face cascade: " << FaceCascadeName << std::endl;
+        exit;
     }
 }
 
-int main(int argc, const char *argv[]) {
-    // Check for valid command line arguments, print usage
-    // if no arguments were given.
-    if (argc < 2) {
-        std::cout << "usage: " << argv[0] << " <csv.ext> <output_folder> " << endl;
-        exit(1);
-    }
+void MakeTrainBase(const std::string &basePath, const std::string &resultsPath) {
+    TestBase base(basePath);
+    std::vector<cv::Rect> faces;
+    while (!base.isEnd()) {
+        cv::Mat img = cv::imread(base.getImgFullFileName());
+        cv::Mat frameGray;
+        cv::cvtColor( img, frameGray, CV_BGR2GRAY );
+        faceCascade.detectMultiScale(frameGray, faces, 1.1, 2, 0|CV_HAAR_SCALE_IMAGE, cv::Size(30, 30));
+        for (size_t i = 0; i < faces.size(); i++) {
+            cv::Mat face = img(faces[i]);
+            std::stringstream imgSavePath;
+            imgSavePath << resultsPath << "/" << i << "_" << base.getImgFileName();
+            cv::imwrite(imgSavePath.str(), face);
+        }
 
-    std::string output_folder = ".";
-    if (argc == 3) {
-        output_folder = string(argv[2]);
+        base.next();
+        faces.clear();
     }
-    // Get the path to your CSV.
-    std::string fn_csv = std::string(argv[1]);
-    // These vectors hold the images and corresponding labels.
-    std::vector<cv::Mat> images;
+}
+
+void MakeTrainBase() {
+    MakeTrainBase("./train_base/men", "./train_base/men_faces");
+    MakeTrainBase("./train_base/women", "./train_base/women_faces");
+}
+
+void MakeTrainData(const std::string &basePath, std::vector<cv::Mat> &testImages, std::vector<int> &labels, int label) {
+    TestBase base(basePath);
+    while (!base.isEnd()) {
+        cv::Mat img = cv::imread(base.getImgFullFileName(), 0);
+        float scaleWidth = 128.0 / img.size().width;
+        float scaleHeight = 128.0 / img.size().height;
+
+        cv::Mat resizeImg;
+        cv::resize(img, resizeImg, cv::Size(0,0), scaleWidth, scaleHeight);
+        testImages.push_back(resizeImg);
+        labels.push_back(label);
+        base.next();
+    }
+}
+
+void MakeTrainData(std::vector<cv::Mat> &testImages, std::vector<int> &labels) {
+    MakeTrainData("./train_base/men_faces", testImages, labels, 0);
+    MakeTrainData("./train_base/women_faces", testImages, labels, 1);
+}
+
+int FaceRecogDemo() {
+    std::vector<cv::Mat> testImages;
     std::vector<int> labels;
-    // Read in the data. This can fail if no valid
-    // input filename is given.
-    try {
-        read_csv(fn_csv, images, labels);
-    } catch (cv::Exception& e) {
-        cerr << "Error opening file \"" << fn_csv << "\". Reason: " << e.msg << endl;
-        // nothing more we can do
-        exit(1);
-    }
-    // Quit if there are not enough images for this demo.
-    if(images.size() <= 1) {
+
+    CascadeInit();
+
+    //MakeTrainBase();
+
+    MakeTrainData(testImages, labels);
+
+    if(testImages.size() <= 1) {
         std::string error_message = "This demo needs at least 2 images to work. Please add more images to your data set!";
         CV_Error(CV_StsError, error_message);
     }
-    // Get the height from the first image. We'll need this
-    // later in code to reshape the images to their original
-    // size:
-    int height = images[0].rows;
-    // The following lines simply get the last images from
-    // your dataset and remove it from the vector. This is
-    // done, so that the training data (which we learn the
-    // cv::FaceRecognizer on) and the test data we test
-    // the model with, do not overlap.
-    cv::Mat testSample = images[images.size() - 1];
-    int testLabel = labels[labels.size() - 1];
-    images.pop_back();
-    labels.pop_back();
-    // The following lines create an Fisherfaces model for
-    // face recognition and train it with the images and
-    // labels read from the given CSV file.
-    // If you just want to keep 10 Fisherfaces, then call
-    // the factory method like this:
-    //
-    //      cv::createFisherFaceRecognizer(10);
-    //
-    // However it is not useful to discard Fisherfaces! Please
-    // always try to use _all_ available Fisherfaces for
-    // classification.
-    //
-    // If you want to create a FaceRecognizer with a
-    // confidence threshold (e.g. 123.0) and use _all_
-    // Fisherfaces, then call it with:
-    //
-    //      cv::createFisherFaceRecognizer(0, 123.0);
-    //
+
+    int height = testImages[0].rows;
+
     cv::Ptr<cv::FaceRecognizer> model = cv::createFisherFaceRecognizer();
-    model->train(images, labels);
+    model->train(testImages, labels);
+    //TestBase testBase("./train_base/men");
+    TestBase testBase("./train_base/women");
+    while (!testBase.isEnd()) {
+        //cv::Mat testImg = cv::imread("./train_base/12.jpg");
+        //cv::Mat testImg = cv::imread("./train_base/6.png");
+        cv::Mat testImg = cv::imread(testBase.getImgFullFileName());
+
+        cv::Mat testImgGray;
+        cvtColor(testImg, testImgGray, CV_BGR2GRAY);
+        std::vector<cv::Rect> faces;
+        faceCascade.detectMultiScale(testImgGray, faces, 1.1, 2, 0|CV_HAAR_SCALE_IMAGE, cv::Size(30, 30));
+        cv::Rect maxFace = cv::Rect();
+        for (size_t i = 0; i < faces.size(); i++) {
+            if (faces[i].area() > maxFace.area()) {
+                maxFace = faces[i];
+            }
+        }
+        testImgGray = testImgGray(maxFace);
+
+        float scaleWidth = 128.0 / testImgGray.size().width;
+        float scaleHeight = 128.0 / testImgGray.size().height;
+
+        cv::Mat resizeImg;
+        cv::resize(testImgGray, resizeImg, cv::Size(0,0), scaleWidth, scaleHeight);
+        cv::imwrite("./result.jpg", resizeImg);
+
+        int predict = model->predict(resizeImg);
+        std::cout << "predict: " << predict << std::endl;
+
+        testBase.next();
+    }
+    /*
     // The following line predicts the label of a given
     // test image:
     int predictedLabel = model->predict(testSample);
@@ -119,8 +149,10 @@ int main(int argc, const char *argv[]) {
     //      double confidence = 0.0;
     //      model->predict(testSample, predictedLabel, confidence);
     //
-    std::string result_message = format("Predicted class = %d / Actual class = %d.", predictedLabel, testLabel);
-    std::cout << result_message << endl;
+    std::stringstream result_message;
+    result_message << "Predicted class = " << predictedLabel << " / Actual class = " << testLabel << ".";
+
+    std::cout << result_message.str() << std::endl;
     // Here is how to get the eigenvalues of this Eigenfaces model:
     cv::Mat eigenvalues = model->getMat("eigenvalues");
     // And we can do the same to display the Eigenvectors (read Eigenfaces):
@@ -131,12 +163,13 @@ int main(int argc, const char *argv[]) {
     if(argc == 2) {
         cv::imshow("mean", norm_0_255(mean.reshape(1, images[0].rows)));
     } else {
-        cv::imwrite(std::format("%s/mean.png", output_folder.c_str()), norm_0_255(mean.reshape(1, images[0].rows)));
+        std::stringstream savePath;
+        savePath << output_folder.c_str() << "/mean.png";
+        cv::imwrite(format(savePath.str(), norm_0_255(mean.reshape(1, images[0].rows)));
     }
     // Display or save the first, at most 16 Fisherfaces:
     for (int i = 0; i < min(16, W.cols); i++) {
-        std::string msg = format("Eigenvalue #%d = %.5f", i, eigenvalues.at<double>(i));
-        std::cout << msg << endl;
+        std::cout << "Eigenvalue " << i << " = " << eigenvalues.at<double>(i) << std::endl;
         // get eigenvector #i
         cv::Mat ev = W.col(i).clone();
         // Reshape to original size & normalize to [0...255] for imshow.
@@ -144,12 +177,10 @@ int main(int argc, const char *argv[]) {
         // Show the image & apply a Bone colormap for better sensing.
         cv::Mat cgrayscale;
         cv::applyColorMap(grayscale, cgrayscale, COLORMAP_BONE);
-        // Display or save:
-        if(argc == 2) {
-            cv::imshow(format("fisherface_%d", i), cgrayscale);
-        } else {
-            cv::imwrite(format("%s/fisherface_%d.png", output_folder.c_str(), i), norm_0_255(cgrayscale));
-        }
+        //save
+        std::stringstream saveImgPath;
+        saveImgPath << output_folder << "/fisherface_" << i << ".png";
+        cv::imwrite(saveImgPath.str(), norm_0_255(cgrayscale));
     }
     // Display or save the image reconstruction at some predefined steps:
     for(int num_component = 0; num_component < min(16, W.cols); num_component++) {
@@ -169,7 +200,7 @@ int main(int argc, const char *argv[]) {
     // Display if we are not writing to an output folder:
     if(argc == 2) {
         waitKey(0);
-    }
+    }*/
     return 0;
 }
 

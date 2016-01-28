@@ -10,6 +10,7 @@ chin_types_base_small/*
 dlib_res/*
 CMakeFiles/*
 *.cbp
+./libs/*
 CMakeCache.txt
 *.txt.user
 dlib_res/*

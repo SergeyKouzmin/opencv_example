@@ -1,7 +1,7 @@
 #include <iostream>
 #include "FaceRecog.h"
 
-int main () {
-    std::cout << "WWWWWWWWW" << std::endl;
+int main() {
+    FaceRecogDemo();
     return 0;
 }
